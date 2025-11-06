@@ -1,0 +1,116 @@
+clc; clear; close all;
+% ----------------- Basic Genetic Algorithm (Real-coded) -----------------
+% Uses: tournament selection, arithmetic crossover, Gaussian mutation, elitism
+% Depends on: testfunctions.m (your existing file)
+
+funcChoice = 6;      % 1..10 from testfunctions.m (e.g., 6 = Rastrigin)
+dim        = 2;      % number of variables
+popSize    = 50;     % population size (even number preferred)
+maxIter    = 200;    % generations
+lb         = -5 * ones(1,dim);
+ub         =  5 * ones(1,dim);
+
+pc = 0.9;            % crossover probability
+pm = 0.1;            % mutation probability (per variable)
+sigma = 0.1*(ub-lb); % Gaussian mutation std-dev (per dim)
+tournK = 3;          % tournament size
+elitism = 2;         % number of best individuals preserved
+
+% ----------------- Initialization -----------------
+pop = lb + (ub-lb).*rand(popSize, dim);
+fit = eval_pop(pop, funcChoice);
+
+[bestVal, bIdx] = min(fit);
+bestSol = pop(bIdx,:);
+bestHistory = zeros(maxIter,1);
+
+% ----------------- Main GA Loop -----------------
+for it = 1:maxIter
+    % --- Elitism: keep top 'elitism' individuals ---
+    [fitSorted, ord] = sort(fit);
+    elites = pop(ord(1:elitism),:);
+
+    % --- Create new population via selection + crossover + mutation ---
+    newPop = zeros(popSize, dim);
+    % keep elites first
+    newPop(1:elitism,:) = elites;
+
+    % fill the rest in pairs
+    idx = elitism + 1;
+    while idx <= popSize
+        % Selection (tournament)
+        p1 = tournament_select(pop, fit, tournK);
+        p2 = tournament_select(pop, fit, tournK);
+
+        % Crossover (arithmetic)
+        if rand < pc
+            [c1, c2] = crossover_arith(p1, p2);
+        else
+            c1 = p1; c2 = p2;
+        end
+
+        % Mutation (Gaussian, component-wise)
+        c1 = mutate_gaussian(c1, pm, sigma, lb, ub);
+        c2 = mutate_gaussian(c2, pm, sigma, lb, ub);
+
+        newPop(idx,:) = c1;
+        if idx+1 <= popSize
+            newPop(idx+1,:) = c2;
+        end
+        idx = idx + 2;
+    end
+
+    pop = newPop;
+    fit = eval_pop(pop, funcChoice);
+
+    % Track global best
+    [genBest, gIdx] = min(fit);
+    if genBest < bestVal
+        bestVal = genBest;
+        bestSol = pop(gIdx,:);
+    end
+    bestHistory(it) = bestVal;
+
+    fprintf('Gen %3d | Best = %.6f | bestSol=%s\n', it, bestVal, mat2str(bestSol,4));
+end
+
+% ----------------- Plot -----------------
+figure('Name','Convergence - Basic GA','NumberTitle','off');
+plot(bestHistory,'LineWidth',2);
+xlabel('Generation'); ylabel('Best Fitness'); grid on;
+title('Convergence - Basic GA');
+
+% ----------------- Local helper functions (ok in scripts) -----------------
+function f = eval_pop(P, funcChoice)
+    n = size(P,1);
+    f = zeros(n,1);
+    for i=1:n
+        f(i) = testfunctions(P(i,:), funcChoice);
+    end
+end
+
+function parent = tournament_select(P, F, k)
+    n = size(P,1);
+    cand = randi(n, [k,1]);
+    [~,idx] = min(F(cand));
+    parent = P(cand(idx),:);
+end
+
+function [c1, c2] = crossover_arith(p1, p2)
+    % arithmetic crossover: convex combination with random alpha
+    alpha = rand;
+    c1 = alpha*p1 + (1-alpha)*p2;
+    c2 = alpha*p2 + (1-alpha)*p1;
+end
+
+function child = mutate_gaussian(x, pm, sigma, lb, ub)
+    child = x;
+    for j = 1:numel(x)
+        if rand < pm
+            child(j) = child(j) + sigma(j).*randn;
+        end
+    end
+    % keep inside bounds
+    child = max(child, lb);
+    child = min(child, ub);
+end
