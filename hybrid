@@ -1,0 +1,123 @@
+clc; clear; close all;
+% ----------------- Hybrid Genetic Algorithm -----------------
+% Oppostion-Based Initialization + Adaptive Mutation
+% Depends on: testfunctions.m
+
+funcChoice = 6;      % 1..10
+dim        = 2;
+popSize    = 50;
+maxIter    = 200;
+lb         = -5 * ones(1,dim);
+ub         =  5 * ones(1,dim);
+
+pc = 0.9;            % crossover probability
+pm0 = 0.2;           % initial mutation prob (will decay)
+pmMin = 0.02;        % min mutation prob
+sigma0 = 0.2*(ub-lb);% initial Gaussian std
+sigmaMin = 0.02*(ub-lb);
+tournK = 3;
+elitism = 2;
+
+% ----------------- OBL Initialization -----------------
+% For each random point x, compute opposite xo = lb + ub - x; keep the better.
+Xrand = lb + (ub-lb).*rand(popSize, dim);
+Xopp  = lb + ub - Xrand;
+
+fitR = eval_pop(Xrand, funcChoice);
+fitO = eval_pop(Xopp,  funcChoice);
+
+pop = Xrand;
+swapMask = fitO < fitR;
+pop(swapMask,:) = Xopp(swapMask,:);
+fit = eval_pop(pop, funcChoice);
+
+[bestVal, bIdx] = min(fit);
+bestSol = pop(bIdx,:);
+bestHistory = zeros(maxIter,1);
+
+% ----------------- Main GA Loop -----------------
+for it = 1:maxIter
+    % Adaptive mutation params (linear decay)
+    pm    = pm0    - (pm0 - pmMin)    * (it-1)/(maxIter-1);
+    sigma = sigma0 - (sigma0 - sigmaMin)* (it-1)/(maxIter-1);
+
+    % --- Elitism ---
+    [~, ord] = sort(fit);
+    elites = pop(ord(1:elitism),:);
+
+    % --- Offspring ---
+    newPop = zeros(popSize, dim);
+    newPop(1:elitism,:) = elites;
+
+    idx = elitism + 1;
+    while idx <= popSize
+        p1 = tournament_select(pop, fit, tournK);
+        p2 = tournament_select(pop, fit, tournK);
+
+        if rand < pc
+            [c1, c2] = crossover_arith(p1, p2);
+        else
+            c1 = p1; c2 = p2;
+        end
+
+        c1 = mutate_gaussian(c1, pm, sigma, lb, ub);
+        c2 = mutate_gaussian(c2, pm, sigma, lb, ub);
+
+        newPop(idx,:) = c1;
+        if idx+1 <= popSize, newPop(idx+1,:) = c2; end
+        idx = idx + 2;
+    end
+
+    pop = newPop;
+    fit = eval_pop(pop, funcChoice);
+
+    % global best
+    [genBest, gIdx] = min(fit);
+    if genBest < bestVal
+        bestVal = genBest;
+        bestSol = pop(gIdx,:);
+    end
+    bestHistory(it) = bestVal;
+
+    fprintf('Gen %3d | Best=%.6f | pm=%.3f | sigma~=%.3f | bestSol=%s\n', ...
+            it, bestVal, pm, mean(sigma), mat2str(bestSol,4));
+end
+
+% ----------------- Plot -----------------
+figure('Name','Convergence - Hybrid GA','NumberTitle','off');
+plot(bestHistory,'r','LineWidth',2);
+xlabel('Generation'); ylabel('Best Fitness'); grid on;
+title('Convergence - Hybrid GA');
+
+% ----------------- Local helper functions -----------------
+function f = eval_pop(P, funcChoice)
+    n = size(P,1);
+    f = zeros(n,1);
+    for i=1:n
+        f(i) = testfunctions(P(i,:), funcChoice);
+    end
+end
+
+function parent = tournament_select(P, F, k)
+    n = size(P,1);
+    cand = randi(n, [k,1]);
+    [~,idx] = min(F(cand));
+    parent = P(cand(idx),:);
+end
+
+function [c1, c2] = crossover_arith(p1, p2)
+    alpha = rand;
+    c1 = alpha*p1 + (1-alpha)*p2;
+    c2 = alpha*p2 + (1-alpha)*p1;
+end
+
+function child = mutate_gaussian(x, pm, sigma, lb, ub)
+    child = x;
+    for j = 1:numel(x)
+        if rand < pm
+            child(j) = child(j) + sigma(j).*randn;
+        end
+    end
+    child = max(child, lb);
+    child = min(child, ub);
+end
